@@ -55,9 +55,6 @@ const smtpServer = new SMTPServer({
 
 smtpServer.listen(25, '0.0.0.0');
 
-app.get('/', (req, res) => {
-  res.send('Hi');
-});
 
 app.get('/api/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
