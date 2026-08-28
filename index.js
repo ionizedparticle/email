@@ -55,6 +55,10 @@ const smtpServer = new SMTPServer({
 
 smtpServer.listen(25, '0.0.0.0');
 
+app.get('/', (req, res) => {
+  res.send('Hi');
+});
+
 app.get('/api/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -106,7 +110,5 @@ setInterval(() => {
   db.prepare('DELETE FROM emails WHERE received_at < ?').run(thirtyDaysAgo);
 }, 60000 * 60);
 
-app.get('/', (req, res) => {
-  res.send('Hi');
-});
+
 app.listen(3000, '0.0.0.0');
