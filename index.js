@@ -1,6 +1,4 @@
 import express from 'express';
-import { SMTPServer } from 'smtp-server';
-import { simpleParser } from 'mailparser';
 import Database from 'better-sqlite3';
 
 const App = express();
@@ -23,38 +21,6 @@ Db.exec(`
 `);
 
 let SseClients = [];
-
-const SmtpServer = new SMTPServer({
-  disabledCommands: ['AUTH'],
-  authOptional: true,
-  onData(Stream, Session, Callback) {
-    console.log('=== SMTP DATA RECEIVED ===');
-    simpleParser(Stream)
-      .then(Parsed => {
-        console.log('Parsed SMTP Email:', Parsed.subject);
-        const CleanEmail = {
-          id: Math.random().toString(36).substring(2, 11),
-          to: Parsed.to?.text || '',
-          from: Parsed.from?.text || '',
-          subject: Parsed.subject || 'No Subject',
-          text: Parsed.text || '',
-          html: Parsed.html || '',
-          receivedAt: Date.now()
-        };
-
-        const Insert = Db.prepare(`
-          INSERT INTO emails (id, inbox_to, mail_from, subject, text_content, html_content, received_at)
-          VALUES (@id, @to, @from, @subject, @text, @html, @receivedAt)
-        `);
-        Insert.run(CleanEmail);
-        BroadcastToSSE(CleanEmail);
-      })
-      .catch(Err => console.error('SMTP Parsing Error:', Err))
-      .finally(() => Callback());
-  }
-});
-
-SmtpServer.listen(25, '0.0.0.0');
 
 App.get('/api/stream', (Req, Res) => {
   Res.setHeader('Content-Type', 'text/event-stream');
