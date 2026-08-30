@@ -78,6 +78,30 @@ function broadcastToSSE(email) {
   sseClients.forEach(c => c.res.write(`data: ${dataString}\n\n`));
 }
 
+app.post('/api/incoming', (req, res) => {
+  const { envelope, headers, plain, html } = req.body;
+
+  const emailPayload = {
+    id: Math.random().toString(36).substring(2, 11),
+    to: envelope?.to || '',
+    from: envelope?.from || '',
+    subject: headers?.subject || 'No Subject',
+    text: plain || '',
+    html: html || '',
+    receivedAt: Date.now()
+  };
+
+  const insert = db.prepare(`
+    INSERT INTO emails (id, inbox_to, mail_from, subject, text_content, html_content, received_at)
+    VALUES (@id, @to, @from, @subject, @text, @html, @receivedAt)
+  `);
+
+  insert.run(emailPayload);
+  broadcastToSSE(emailPayload);
+
+  return res.status(200).json({ success: true });
+});
+
 app.delete('/api/messages/:id', (req, res) => {
   const { id } = req.params;
   const info = db.prepare('DELETE FROM emails WHERE id = ?').run(id);
