@@ -1,7 +1,10 @@
 import express from 'express';
 import Database from 'better-sqlite3';
+import multer from 'multer';
 
+const Upload = multer();
 const App = express();
+
 App.use(express.json());
 App.use(express.urlencoded({ extended: true }));
 
@@ -21,6 +24,10 @@ Db.exec(`
 `);
 
 let SseClients = [];
+
+App.get('/', (Req, Res) => {
+  return Res.send('hi');
+});
 
 App.get('/api/stream', (Req, Res) => {
   Res.setHeader('Content-Type', 'text/event-stream');
@@ -45,7 +52,23 @@ function BroadcastToSSE(Email) {
   SseClients.forEach(C => C.res.write(`data: ${DataString}\n\n`));
 }
 
-App.post('/api/incoming', (Req, Res) => {
+function ExtractEmailAddress(Input) {
+  if (!Input) return '';
+  if (typeof Input === 'object') {
+    if (Array.isArray(Input.value) && Input.value[0]?.address) {
+      return Input.value[0].address.trim();
+    }
+    if (Input.address) return Input.address.trim();
+    if (Input.text) Input = Input.text;
+  }
+  if (typeof Input === 'string') {
+    const Match = Input.match(/<([^>]+)>/);
+    return Match ? Match[1].trim() : Input.trim();
+  }
+  return '';
+}
+
+App.post('/api/incoming', Upload.none(), (Req, Res) => {
   console.log('=== INCOMING WEBHOOK RECEIVED ===');
   console.log('Headers:', JSON.stringify(Req.headers, null, 2));
   console.log('Query Params:', JSON.stringify(Req.query, null, 2));
@@ -53,26 +76,14 @@ App.post('/api/incoming', (Req, Res) => {
 
   const Body = Req.body;
 
-  let Recipient = '';
-  if (Array.isArray(Body.to)) {
-    Recipient = Body.to[0]?.address || Body.to[0] || '';
-  } else if (typeof Body.to === 'object') {
-    Recipient = Body.to?.address || '';
-  } else {
-    Recipient = Body.to || Req.query.inbox || '';
+  let Recipient = ExtractEmailAddress(Body.to);
+  if (!Recipient && Req.query.inbox) {
+    const RawQuery = Req.query.inbox.trim();
+    Recipient = RawQuery.includes('@') ? RawQuery : `${RawQuery}@discord.dedyn.io`;
   }
-
-  Recipient = Recipient.replace(/.*<([^>]+)>.*/, '$1').trim();
   console.log('Extracted Recipient:', Recipient);
 
-  let Sender = '';
-  if (Array.isArray(Body.from)) {
-    Sender = Body.from[0]?.address || Body.from[0] || '';
-  } else if (typeof Body.from === 'object') {
-    Sender = Body.from?.address || '';
-  } else {
-    Sender = Body.from || '';
-  }
+  let Sender = ExtractEmailAddress(Body.from);
   console.log('Extracted Sender:', Sender);
 
   const EmailPayload = {
