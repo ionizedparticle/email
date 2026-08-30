@@ -3,12 +3,13 @@ import { SMTPServer } from 'smtp-server';
 import { simpleParser } from 'mailparser';
 import Database from 'better-sqlite3';
 
-const app = express();
-app.use(express.json());
+const App = express();
+App.use(express.json());
+App.use(express.urlencoded({ extended: true }));
 
-const db = new Database('emails.db');
+const Db = new Database('emails.db');
 
-db.exec(`
+Db.exec(`
   CREATE TABLE IF NOT EXISTS emails (
     id TEXT PRIMARY KEY,
     inbox_to TEXT,
@@ -21,115 +22,131 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_inbox ON emails(inbox_to);
 `);
 
-let sseClients = [];
+let SseClients = [];
 
-const smtpServer = new SMTPServer({
+const SmtpServer = new SMTPServer({
   disabledCommands: ['AUTH'],
   authOptional: true,
-  
-  onData(stream, session, callback) {
-    simpleParser(stream)
-      .then(parsed => {
-        const cleanEmail = {
+  onData(Stream, Session, Callback) {
+    simpleParser(Stream)
+      .then(Parsed => {
+        const CleanEmail = {
           id: Math.random().toString(36).substring(2, 11),
-          to: parsed.to?.text || '',
-          from: parsed.from?.text || '',
-          subject: parsed.subject || 'No Subject',
-          text: parsed.text || '',
-          html: parsed.html || '',
+          to: Parsed.to?.text || '',
+          from: Parsed.from?.text || '',
+          subject: Parsed.subject || 'No Subject',
+          text: Parsed.text || '',
+          html: Parsed.html || '',
           receivedAt: Date.now()
         };
 
-        const insert = db.prepare(`
+        const Insert = Db.prepare(`
           INSERT INTO emails (id, inbox_to, mail_from, subject, text_content, html_content, received_at)
           VALUES (@id, @to, @from, @subject, @text, @html, @receivedAt)
         `);
-        insert.run(cleanEmail);
-
-        broadcastToSSE(cleanEmail);
+        Insert.run(CleanEmail);
+        BroadcastToSSE(CleanEmail);
       })
       .catch(() => {})
-      .finally(() => callback());
+      .finally(() => Callback());
   }
 });
 
-smtpServer.listen(25, '0.0.0.0');
+SmtpServer.listen(25, '0.0.0.0');
 
+App.get('/api/stream', (Req, Res) => {
+  Res.setHeader('Content-Type', 'text/event-stream');
+  Res.setHeader('Cache-Control', 'no-cache');
+  Res.setHeader('Connection', 'keep-alive');
+  Res.flushHeaders();
 
-app.get('/api/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
+  const ClientId = Date.now();
+  SseClients.push({ id: ClientId, res: Res });
 
-  const clientId = Date.now();
-  sseClients.push({ id: clientId, res });
+  const KeepAlive = setInterval(() => Res.write(': keepalive\n\n'), 30000);
 
-  const keepAlive = setInterval(() => res.write(': keepalive\n\n'), 30000);
-
-  req.on('close', () => {
-    clearInterval(keepAlive);
-    sseClients = sseClients.filter(c => c.id !== clientId);
+  Req.on('close', () => {
+    clearInterval(KeepAlive);
+    SseClients = SseClients.filter(C => C.id !== ClientId);
   });
 });
 
-function broadcastToSSE(email) {
-  const dataString = JSON.stringify(email);
-  sseClients.forEach(c => c.res.write(`data: ${dataString}\n\n`));
+function BroadcastToSSE(Email) {
+  const DataString = JSON.stringify(Email);
+  SseClients.forEach(C => C.res.write(`data: ${DataString}\n\n`));
 }
 
-app.post('/api/incoming', (req, res) => {
-  const { envelope, headers, plain, html } = req.body;
+App.post('/api/incoming', (Req, Res) => {
+  const Body = Req.body;
 
-  const emailPayload = {
+  let Recipient = '';
+  if (Array.isArray(Body.to)) {
+    Recipient = Body.to[0]?.address || Body.to[0] || '';
+  } else if (typeof Body.to === 'object') {
+    Recipient = Body.to?.address || '';
+  } else {
+    Recipient = Body.to || Req.query.inbox || '';
+  }
+
+  Recipient = Recipient.replace(/.*<([^>]+)>.*/, '$1').trim();
+
+  let Sender = '';
+  if (Array.isArray(Body.from)) {
+    Sender = Body.from[0]?.address || Body.from[0] || '';
+  } else if (typeof Body.from === 'object') {
+    Sender = Body.from?.address || '';
+  } else {
+    Sender = Body.from || '';
+  }
+
+  const EmailPayload = {
     id: Math.random().toString(36).substring(2, 11),
-    to: envelope?.to || '',
-    from: envelope?.from || '',
-    subject: headers?.subject || 'No Subject',
-    text: plain || '',
-    html: html || '',
+    to: Recipient,
+    from: Sender,
+    subject: Body.subject || 'No Subject',
+    text: Body.text || Body.plain || '',
+    html: Body.html || '',
     receivedAt: Date.now()
   };
 
-  const insert = db.prepare(`
+  const Insert = Db.prepare(`
     INSERT INTO emails (id, inbox_to, mail_from, subject, text_content, html_content, received_at)
     VALUES (@id, @to, @from, @subject, @text, @html, @receivedAt)
   `);
 
-  insert.run(emailPayload);
-  broadcastToSSE(emailPayload);
+  Insert.run(EmailPayload);
+  BroadcastToSSE(EmailPayload);
 
-  return res.status(200).json({ success: true });
+  return Res.status(200).json({ success: true });
 });
 
-app.delete('/api/messages/:id', (req, res) => {
-  const { id } = req.params;
-  const info = db.prepare('DELETE FROM emails WHERE id = ?').run(id);
+App.delete('/api/messages/:id', (Req, Res) => {
+  const { id: Id } = Req.params;
+  const Info = Db.prepare('DELETE FROM emails WHERE id = ?').run(Id);
   
-  if (info.changes === 0) return res.status(404).json({ error: "Message not found" });
-  return res.json({ success: true, message: `Email ${id} deleted successfully.` });
+  if (Info.changes === 0) return Res.status(404).json({ error: "Message not found" });
+  return Res.json({ success: true, message: `Email ${Id} deleted successfully.` });
 });
 
-app.delete('/api/inbox', (req, res) => {
-  const targetEmail = req.query.email;
-  if (!targetEmail) return res.status(400).json({ error: "Missing 'email' parameter" });
+App.delete('/api/inbox', (Req, Res) => {
+  const TargetEmail = Req.query.email;
+  if (!TargetEmail) return Res.status(400).json({ error: "Missing 'email' parameter" });
 
-  const info = db.prepare('DELETE FROM emails WHERE inbox_to LIKE ?').run(`%${targetEmail}%`);
-  return res.json({ success: true, deletedCount: info.changes });
+  const Info = Db.prepare('DELETE FROM emails WHERE inbox_to LIKE ?').run(`%${TargetEmail}%`);
+  return Res.json({ success: true, deletedCount: Info.changes });
 });
 
-app.get('/api/messages', (req, res) => {
-  const targetEmail = req.query.email;
-  if (!targetEmail) return res.status(400).json({ error: "Missing 'email' parameter" });
+App.get('/api/messages', (Req, Res) => {
+  const TargetEmail = Req.query.email;
+  if (!TargetEmail) return Res.status(400).json({ error: "Missing 'email' parameter" });
 
-  const rows = db.prepare('SELECT * FROM emails WHERE inbox_to LIKE ? ORDER BY received_at DESC').all(`%${targetEmail}%`);
-  return res.json({ email: targetEmail, count: rows.length, messages: rows });
+  const Rows = Db.prepare('SELECT * FROM emails WHERE inbox_to LIKE ? ORDER BY received_at DESC').all(`%${TargetEmail}%`);
+  return Res.json({ email: TargetEmail, count: Rows.length, messages: Rows });
 });
 
 setInterval(() => {
-  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-  db.prepare('DELETE FROM emails WHERE received_at < ?').run(thirtyDaysAgo);
+  const ThirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  Db.prepare('DELETE FROM emails WHERE received_at < ?').run(ThirtyDaysAgo);
 }, 60000 * 60);
 
-
-app.listen(3000, '0.0.0.0');
+App.listen(3000, '0.0.0.0');
