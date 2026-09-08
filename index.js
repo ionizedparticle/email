@@ -142,6 +142,25 @@ App.get('/api/messages', (Req, Res) => {
   return Res.json({ email: TargetEmail, count: Rows.length, messages: Rows });
 });
 
+App.post('/api/messages/batch', (Req, Res) => {
+  const { emails: TargetEmails } = Req.body;
+  if (!Array.isArray(TargetEmails) || TargetEmails.length === 0) {
+    return Res.json({ messages: [] });
+  }
+
+  const Placeholders = TargetEmails.map(() => '?').join(',');
+  
+  const Query = `
+    SELECT id, inbox_to, mail_from, subject, text_content, html_content, received_at 
+    FROM emails 
+    WHERE inbox_to IN (${Placeholders}) 
+    ORDER BY received_at DESC
+  `;
+
+  const Rows = Db.prepare(Query).all(...TargetEmails);
+  return Res.json({ messages: Rows });
+});
+
 setInterval(() => {
   const ThirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
   Db.prepare('DELETE FROM emails WHERE received_at < ?').run(ThirtyDaysAgo);
