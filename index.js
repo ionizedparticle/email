@@ -1,5 +1,5 @@
 import express from 'express';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import multer from 'multer';
 
 const Upload = multer();
@@ -8,7 +8,7 @@ const App = express();
 App.use(express.json());
 App.use(express.urlencoded({ extended: true }));
 
-const Db = new Database('emails.db');
+const Db = new DatabaseSync('emails.db');
 
 Db.exec(`
   CREATE TABLE IF NOT EXISTS emails (
@@ -47,7 +47,6 @@ App.get('/api/stream', (Req, Res) => {
 });
 
 function BroadcastToSSE(Email) {
-  console.log('Broadcasting to SSE clients:', SseClients.length);
   const DataString = JSON.stringify(Email);
   SseClients.forEach(C => C.res.write(`data: ${DataString}\n\n`));
 }
@@ -91,9 +90,17 @@ App.post('/api/incoming', Upload.none(), (Req, Res) => {
   try {
     const Insert = Db.prepare(`
       INSERT INTO emails (id, inbox_to, mail_from, subject, text_content, html_content, received_at)
-      VALUES (@id, @to, @from, @subject, @text, @html, @receivedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    Insert.run(EmailPayload);
+    Insert.run(
+      EmailPayload.id,
+      EmailPayload.to,
+      EmailPayload.from,
+      EmailPayload.subject,
+      EmailPayload.text,
+      EmailPayload.html,
+      EmailPayload.receivedAt
+    );
   } catch (Err) {
     console.error('Database Insertion Error:', Err);
   }
@@ -106,8 +113,8 @@ App.post('/api/incoming', Upload.none(), (Req, Res) => {
 App.delete('/api/messages/:id', (Req, Res) => {
   const { id: Id } = Req.params;
   const Info = Db.prepare('DELETE FROM emails WHERE id = ?').run(Id);
-  
-  if (Info.changes === 0) return Res.status(404).json({ error: "Message not found" });
+
+  if (Number(Info.changes) === 0) return Res.status(404).json({ error: "Message not found" });
   return Res.json({ success: true, message: `Email ${Id} deleted successfully.` });
 });
 
@@ -116,7 +123,7 @@ App.delete('/api/inbox', (Req, Res) => {
   if (!TargetEmail) return Res.status(400).json({ error: "Missing 'email' parameter" });
 
   const Info = Db.prepare('DELETE FROM emails WHERE inbox_to LIKE ?').run(`%${TargetEmail}%`);
-  return Res.json({ success: true, deletedCount: Info.changes });
+  return Res.json({ success: true, deletedCount: Number(Info.changes) });
 });
 
 App.get('/api/messages', (Req, Res) => {
@@ -134,7 +141,7 @@ App.post('/api/messages/batch', (Req, Res) => {
   }
 
   const Placeholders = TargetEmails.map(() => '?').join(',');
-  
+
   const Query = `
     SELECT id, inbox_to, mail_from, subject, text_content, html_content, received_at 
     FROM emails 
