@@ -69,11 +69,6 @@ function ExtractEmailAddress(Input) {
 }
 
 App.post('/api/incoming', Upload.none(), (Req, Res) => {
-  console.log('=== INCOMING WEBHOOK RECEIVED ===');
-  console.log('Headers:', JSON.stringify(Req.headers, null, 2));
-  console.log('Query Params:', JSON.stringify(Req.query, null, 2));
-  console.log('Raw Body:', JSON.stringify(Req.body, null, 2));
-
   const Body = Req.body;
 
   let Recipient = ExtractEmailAddress(Body.to);
@@ -81,10 +76,7 @@ App.post('/api/incoming', Upload.none(), (Req, Res) => {
     const RawQuery = Req.query.inbox.trim();
     Recipient = RawQuery.includes('@') ? RawQuery : `${RawQuery}@discord.dedyn.io`;
   }
-  console.log('Extracted Recipient:', Recipient);
-
   let Sender = ExtractEmailAddress(Body.from);
-  console.log('Extracted Sender:', Sender);
 
   const EmailPayload = {
     id: Math.random().toString(36).substring(2, 11),
@@ -96,15 +88,12 @@ App.post('/api/incoming', Upload.none(), (Req, Res) => {
     receivedAt: Date.now()
   };
 
-  console.log('Email Payload to Save:', EmailPayload);
-
   try {
     const Insert = Db.prepare(`
       INSERT INTO emails (id, inbox_to, mail_from, subject, text_content, html_content, received_at)
       VALUES (@id, @to, @from, @subject, @text, @html, @receivedAt)
     `);
     Insert.run(EmailPayload);
-    console.log('Successfully saved to SQLite!');
   } catch (Err) {
     console.error('Database Insertion Error:', Err);
   }
@@ -116,7 +105,6 @@ App.post('/api/incoming', Upload.none(), (Req, Res) => {
 
 App.delete('/api/messages/:id', (Req, Res) => {
   const { id: Id } = Req.params;
-  console.log('DELETE request for message ID:', Id);
   const Info = Db.prepare('DELETE FROM emails WHERE id = ?').run(Id);
   
   if (Info.changes === 0) return Res.status(404).json({ error: "Message not found" });
@@ -125,7 +113,6 @@ App.delete('/api/messages/:id', (Req, Res) => {
 
 App.delete('/api/inbox', (Req, Res) => {
   const TargetEmail = Req.query.email;
-  console.log('DELETE request for inbox:', TargetEmail);
   if (!TargetEmail) return Res.status(400).json({ error: "Missing 'email' parameter" });
 
   const Info = Db.prepare('DELETE FROM emails WHERE inbox_to LIKE ?').run(`%${TargetEmail}%`);
@@ -134,11 +121,9 @@ App.delete('/api/inbox', (Req, Res) => {
 
 App.get('/api/messages', (Req, Res) => {
   const TargetEmail = Req.query.email;
-  console.log('GET /api/messages for target email:', TargetEmail);
   if (!TargetEmail) return Res.status(400).json({ error: "Missing 'email' parameter" });
 
   const Rows = Db.prepare('SELECT * FROM emails WHERE inbox_to LIKE ? ORDER BY received_at DESC').all(`%${TargetEmail}%`);
-  console.log('Matched Rows Count:', Rows.length);
   return Res.json({ email: TargetEmail, count: Rows.length, messages: Rows });
 });
 
@@ -167,5 +152,5 @@ setInterval(() => {
 }, 60000 * 60);
 
 App.listen(3000, '0.0.0.0', () => {
-  console.log('Server running on port 3000');
+  console.log('running');
 });
