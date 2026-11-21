@@ -8,7 +8,7 @@ const App = express();
 App.use(express.json());
 App.use(express.urlencoded({ extended: true }));
 
-const Db = new DatabaseSync('emails.db');
+const Db = new DatabaseSync('/data/emails.db');
 
 Db.exec(`
   CREATE TABLE IF NOT EXISTS emails (
